@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Google AI Studio App</title>
+    <script>
+      // Fix for "Cannot set property fetch of #<Window> which has only a getter"
+      (function() {
+        console.log('Applying fetch and FormData patches...');
+        
+        // 1. Ensure FormData.prototype.keys exists to prevent formdata-polyfill from running
+        try {
+          if (typeof FormData !== 'undefined' && !FormData.prototype.keys) {
+            FormData.prototype.keys = function* () {
+              // Dummy implementation to satisfy polyfill check
+              var entries = new FormData().entries();
+              for (var entry of entries) {
+                yield entry[0];
+              }
+            };
+            console.log('Patched FormData.prototype.keys');
+          }
+        } catch (e) {
+          console.warn('Failed to patch FormData:', e);
+        }
+
+        // 2. Aggressively make window.fetch writable
+        try {
+          var _fetch = window.fetch;
+          Object.defineProperty(window, 'fetch', {
+            configurable: true,
+            enumerable: true,
+            get: function() { return _fetch; },
+            set: function(v) { 
+              console.log('window.fetch is being overwritten');
+              _fetch = v; 
+            }
+          });
+          console.log('Successfully patched window.fetch to be writable.');
+        } catch (e) {
+          console.error('Failed to patch fetch:', e);
+          
+          // Fallback: try to patch globalThis as well
+          try {
+            var _gFetch = globalThis.fetch;
+            Object.defineProperty(globalThis, 'fetch', {
+              configurable: true,
+              enumerable: true,
+              get: function() { return _gFetch; },
+              set: function(v) { _gFetch = v; }
+            });
+          } catch (e2) {
+            console.error('Failed to patch globalThis.fetch:', e2);
+          }
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
