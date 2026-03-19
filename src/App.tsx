@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Upload, FileText, Settings, Play, Download, CheckCircle2, FileCheck, Eye, EyeOff, Brain, Key, ExternalLink, X, Info } from 'lucide-react';
+import { Upload, FileText, Settings, Play, Download, CheckCircle2, FileCheck, Eye, EyeOff, Brain } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -20,6 +20,18 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+const getValidKey = (k: any) => {
+  if (!k || typeof k !== 'string') return null;
+  const trimmed = k.trim();
+  const invalidValues = [
+    '', 'undefined', 'null', 'placeholder', 'your_api_key', 
+    'my_gemini_api_key', 'enter_your_key', 'api_key_here'
+  ];
+  if (invalidValues.includes(trimmed.toLowerCase())) return null;
+  if (trimmed.length < 10) return null; // Most Gemini keys are longer
+  return trimmed;
+};
+
 export default function App() {
   const [subject, setSubject] = useState('Toán');
   const [topic, setTopic] = useState('');
@@ -34,27 +46,6 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' | 'warning' } | null>(null);
 
-  // AI Settings State
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [apiKey, setApiKey] = useState('');
-  const [selectedModel, setSelectedModel] = useState('gemini-3-flash-preview');
-  const [showApiKey, setShowApiKey] = useState(false);
-
-  // Load settings on mount
-  React.useEffect(() => {
-    const savedKey = localStorage.getItem('gemini_api_key');
-    const savedModel = localStorage.getItem('selected_model');
-    if (savedKey) setApiKey(savedKey);
-    if (savedModel) setSelectedModel(savedModel);
-  }, []);
-
-  const handleSaveSettings = () => {
-    localStorage.setItem('gemini_api_key', apiKey);
-    localStorage.setItem('selected_model', selectedModel);
-    setIsSettingsOpen(false);
-    showNotification('Đã lưu cấu hình thành công!', 'success');
-  };
-
   // Auto-hide notification
   React.useEffect(() => {
     if (notification) {
@@ -67,6 +58,7 @@ export default function App() {
     setNotification({ message, type });
   };
 
+  // File states
   const [matrixFile, setMatrixFile] = useState<File | null>(null);
   const [materialFile, setMaterialFile] = useState<File | null>(null);
   const [deepLearningFile, setDeepLearningFile] = useState<File | null>(null);
@@ -83,6 +75,120 @@ export default function App() {
     'Trả lời ngắn': { 'Nhận biết': '0', 'Thông hiểu': '0', 'Vận dụng': '0', 'Vận dụng cao': '0' },
     'Tự luận': { 'Nhận biết': '0', 'Thông hiểu': '0', 'Vận dụng': '0', 'Vận dụng cao': '0' },
   });
+
+  const [customApiKey, setCustomApiKey] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('gemini_api_key') || '';
+    }
+    return '';
+  });
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [apiKeyStatus, setApiKeyStatus] = useState<'active' | 'required'>('required');
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('selected_model') || 'gemini-3-flash-latest';
+    }
+    return 'gemini-3-flash-latest';
+  });
+
+  const hasAutoShown = useRef(false);
+
+  // Auto-show settings modal on mount if no key found
+  React.useEffect(() => {
+    const key = getValidKey(customApiKey) || getValidKey(process.env.GEMINI_API_KEY);
+    if (!key && !hasAutoShown.current) {
+      const timer = setTimeout(() => {
+        if (!getValidKey(customApiKey) && !getValidKey(process.env.GEMINI_API_KEY)) {
+          setShowSettingsModal(true);
+          hasAutoShown.current = true;
+        }
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  // Clear modal error when user types
+  React.useEffect(() => {
+    if (modalError) setModalError(null);
+  }, [customApiKey]);
+
+  const [isTestingKey, setIsTestingKey] = useState(false);
+
+  const handleTestKey = async () => {
+    const key = getValidKey(customApiKey);
+    if (!key) {
+      setModalError("Vui lòng nhập API Key hợp lệ (ít nhất 10 ký tự).");
+      return;
+    }
+
+    setIsTestingKey(true);
+    setModalError(null);
+    try {
+      const ai = new GoogleGenAI({ apiKey: key });
+      // Simple probe request
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: "Hi",
+      });
+      if (response.text) {
+        showNotification("API Key hoạt động tốt!", "success");
+        setModalError(null);
+      }
+    } catch (error: any) {
+      console.error("Key test error:", error);
+      const msg = error?.message || "";
+      if (msg.includes("API_KEY_INVALID") || msg.includes("401") || msg.includes("403")) {
+        setModalError("API Key không hợp lệ. Vui lòng kiểm tra lại.");
+      } else if (msg.includes("quota") || msg.includes("429")) {
+        setModalError("API Key đã hết hạn hoặc hết hạn mức (Quota).");
+      } else {
+        setModalError("Lỗi khi kiểm tra Key: " + (msg.substring(0, 50) || "Không xác định"));
+      }
+    } finally {
+      setIsTestingKey(false);
+    }
+  };
+
+  const handleSaveSettings = () => {
+    const trimmedKey = customApiKey.trim();
+    const validKey = getValidKey(trimmedKey);
+    
+    if (trimmedKey && !validKey) {
+      setModalError("API Key không đúng định dạng hoặc quá ngắn.");
+      return;
+    }
+
+    if (trimmedKey) {
+      localStorage.setItem('gemini_api_key', trimmedKey);
+      setCustomApiKey(trimmedKey);
+      setApiKeyStatus('active');
+    } else {
+      localStorage.removeItem('gemini_api_key');
+      setCustomApiKey('');
+      setApiKeyStatus('required');
+    }
+    localStorage.setItem('selected_model', selectedModel);
+    setShowSettingsModal(false);
+    showNotification('Đã lưu cấu hình thành công!', 'success');
+  };
+
+  // Check for API key on mount and when window gains focus
+  React.useEffect(() => {
+    const checkKey = () => {
+      const key = getValidKey(customApiKey) || getValidKey(process.env.GEMINI_API_KEY);
+      if (key) {
+        setApiKeyStatus('active');
+      } else {
+        setApiKeyStatus('required');
+      }
+    };
+    
+    checkKey();
+    window.addEventListener('focus', checkKey);
+    return () => window.removeEventListener('focus', checkKey);
+  }, [customApiKey]);
 
   const fileInputRef1 = useRef<HTMLInputElement>(null);
   const fileInputRef2 = useRef<HTMLInputElement>(null);
@@ -177,14 +283,21 @@ export default function App() {
     setOutput('');
 
     try {
-      // Priority: 1. Manual API Key, 2. Environment Variable
-      const effectiveApiKey = apiKey || process.env.GEMINI_API_KEY;
+      const apiKey = getValidKey(customApiKey) || getValidKey(process.env.GEMINI_API_KEY);
       
-      if (!effectiveApiKey || effectiveApiKey === "MY_GEMINI_API_KEY") {
-        setIsSettingsOpen(true);
-        showNotification("Vui lòng cấu hình API Key để tiếp tục.", "warning");
+      let apiKeys: string[] = [];
+      if (apiKey) {
+        apiKeys = apiKey.split(',').map(k => k.trim()).filter(k => k);
+      }
+
+      if (apiKeys.length === 0) {
+        setModalError("Vui lòng nhập API Key hợp lệ để tiếp tục.");
+        setShowSettingsModal(true);
+        setOutput("Vui lòng cấu hình API Key trong phần thiết lập để tiếp tục.");
         setIsLoading(false);
         return;
+      } else {
+        setApiKeyStatus('active');
       }
       
       const prompt = `
@@ -243,7 +356,7 @@ export default function App() {
         --- CHẾ ĐỘ HỌC SÂU (DEEP LEARNING) ĐANG BẬT ---
         Bạn phải thực hiện quy trình tư duy 3 bước trước khi viết đề:
         Bước 1: Phân tích tài liệu học sâu để tìm ra các "điểm mù" kiến thức, các lỗi sai kinh điển, và các dạng bài biến tướng phức tạp nhất.
-        Bước 2: Đối chiếu tài liệu học sâu với Ma trận đề thi để đảm bảo các câu hỏi Vận dụng cao thực sự mang tính đột phá and sáng tạo.
+        Bước 2: Đối chiếu tài liệu học sâu với Ma trận đề thi để đảm bảo các câu hỏi Vận dụng cao thực sự mang tính đột phá và sáng tạo.
         Bước 3: Thiết kế các câu hỏi có tính liên môn hoặc tích hợp nhiều mảng kiến thức từ tài liệu học sâu.
         YÊU CẦU: Đề thi phải có ít nhất 20% câu hỏi mang phong cách "Học sâu" - tức là những câu hỏi đòi hỏi học sinh phải hiểu bản chất cực sâu thay vì chỉ áp dụng công thức.
         ` : ''}
@@ -284,56 +397,80 @@ export default function App() {
       let success = false;
       let lastError: any = null;
 
-      try {
-        const ai = new GoogleGenAI({ apiKey: effectiveApiKey });
-        // Use user selected model or fallback to flash-preview
-        const modelName = selectedModel || "gemini-3-flash-preview";
-        const isGemini3 = modelName.startsWith('gemini-3');
-        
-        const response = await ai.models.generateContentStream({
-          model: modelName,
-          contents: prompt,
-          config: {
-            temperature: 0.7,
-            ...(isDeepLearning && isGemini3 ? {
-              thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH }
-            } : {})
-          }
-        });
+      for (let i = 0; i < apiKeys.length; i++) {
+        const currentKey = apiKeys[i];
+        try {
+          const ai = new GoogleGenAI({ apiKey: currentKey });
+          const modelName = selectedModel;
+          
+          const response = await ai.models.generateContentStream({
+            model: modelName,
+            contents: prompt,
+            config: isDeepLearning ? {
+              thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+              temperature: 0.7, // Slightly lower temperature for more focused reasoning
+            } : undefined
+          });
 
-        let fullText = '';
-        for await (const chunk of response) {
-          const cleanedChunk = (chunk.text || '').replace(/\*\*/g, '');
-          fullText += cleanedChunk;
-          setOutput(fullText);
+          let fullText = '';
+          for await (const chunk of response) {
+            // Remove double asterisks from the chunk text
+            const cleanedChunk = (chunk.text || '').replace(/\*\*/g, '');
+            fullText += cleanedChunk;
+            setOutput(fullText);
+          }
+          
+          success = true;
+          break; // Success, exit the retry loop
+        } catch (error: any) {
+          console.error(`Error with API key index ${i}:`, error);
+          lastError = error;
+          const errorMessage = error?.message || "";
+          
+          if ((errorMessage.includes("429") || errorMessage.includes("RESOURCE_EXHAUSTED") || errorMessage.includes("quota")) && i < apiKeys.length - 1) {
+            showNotification(`Key thứ ${i + 1} đã hết hạn/quota. Đang tự động chuyển sang key tiếp theo...`, "warning");
+            continue; // Try next key
+          }
+          
+          break; // Not a rate limit error, or no more keys to try
         }
-        
-        success = true;
-      } catch (error: any) {
-        console.error(`Error with API key:`, error);
-        lastError = error;
       }
 
       if (!success && lastError) {
-        throw lastError;
+        throw lastError; // Throw to the outer catch block for final error handling
       }
     } catch (error: any) {
       console.error("Error generating exam:", error);
       
       const errorMessage = error?.message || "";
       
+      // Handle token limit error specifically
       if (errorMessage.includes("exceeds the maximum number of tokens")) {
-        setOutput("Lỗi: Nội dung tài liệu quá lớn. Vui lòng chia nhỏ file.");
+        setOutput("Lỗi: Nội dung tài liệu quá lớn, vượt quá giới hạn xử lý của AI. Vui lòng sử dụng tài liệu ngắn hơn hoặc chia nhỏ file.");
         return;
       }
 
+      // Handle rate limit / quota exceeded
       if (errorMessage.includes("429") || errorMessage.includes("RESOURCE_EXHAUSTED") || errorMessage.includes("quota")) {
-        setOutput("Lỗi: Đã vượt quá giới hạn sử dụng (Quota). Vui lòng thử lại sau.");
-        showNotification("Đã vượt quá giới hạn API. Vui lòng thử lại sau.", "error");
+        setOutput("Lỗi: Đã vượt quá giới hạn sử dụng (Quota) của API Key hiện tại. Vui lòng sử dụng API Key khác hoặc thử lại sau.");
+        showNotification("Đã vượt quá giới hạn API. Vui lòng thử lại sau hoặc đổi API Key.", "error");
         return;
       }
 
-      setOutput("Đã xảy ra lỗi khi tạo đề thi. Vui lòng kiểm tra API Key và cấu hình trong phần Cài đặt (biểu tượng bánh răng).");
+      // If the error suggests the API key is missing or invalid, prompt for configuration
+      if (
+        errorMessage.includes("Requested entity was not found") || 
+        errorMessage.includes("API_KEY") ||
+        errorMessage.includes("403") ||
+        errorMessage.includes("401") ||
+        errorMessage.includes("invalid")
+      ) {
+        setModalError("API Key không hợp lệ hoặc đã hết hạn. Vui lòng kiểm tra lại.");
+        setShowSettingsModal(true);
+        setOutput("Lỗi API Key hoặc Key không hợp lệ. Vui lòng kiểm tra lại cấu hình.");
+      } else {
+        setOutput("Đã xảy ra lỗi khi tạo đề thi. Vui lòng thử lại sau.");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -418,6 +555,182 @@ export default function App() {
 
   return (
     <div className="min-h-screen p-4 md:p-6 max-w-7xl mx-auto relative">
+      {/* Settings Modal */}
+      <AnimatePresence>
+        {showSettingsModal && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="bg-emerald-600 p-6 flex items-center justify-between text-white">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                    <Settings size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold">Cấu hình AI & API Key</h3>
+                    <p className="text-emerald-100 text-sm">Thiết lập kết nối để tạo mô phỏng</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowSettingsModal(false)}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                >
+                  <Settings size={24} className="rotate-45" />
+                </button>
+              </div>
+
+              <div className="p-8 space-y-8">
+                {modalError && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-red-50 border border-red-200 p-4 rounded-xl flex items-center gap-3 text-red-700"
+                  >
+                    <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+                      <Settings size={16} className="text-red-600" />
+                    </div>
+                    <p className="text-sm font-bold">{modalError}</p>
+                  </motion.div>
+                )}
+
+                {/* Section 1: API Key */}
+                <div className="space-y-4">
+                  <h4 className="text-lg font-bold text-gray-800 flex items-center gap-1">
+                    1. Google Gemini API Key <span className="text-red-500">*</span>
+                  </h4>
+                  
+                  <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-4">
+                    <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+                      <FileText size={20} className="text-blue-600" />
+                    </div>
+                    <div className="space-y-3">
+                      <p className="text-blue-800 text-sm font-medium">Bạn chưa có API Key? Hãy lấy key miễn phí từ Google:</p>
+                      <div className="flex flex-wrap gap-3">
+                        <a 
+                          href="https://aistudio.google.com/app/apikey" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors"
+                        >
+                          Lấy API Key ngay <Download size={16} className="-rotate-90" />
+                        </a>
+                        <a 
+                          href="https://ai.google.dev/gemini-api/docs/api-key" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 border border-gray-200 rounded-lg text-sm font-bold hover:bg-gray-50 transition-colors"
+                        >
+                          Xem hướng dẫn chi tiết <Download size={16} className="-rotate-90" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="relative">
+                    <input 
+                      type={showApiKey ? "text" : "password"}
+                      value={customApiKey}
+                      onChange={(e) => setCustomApiKey(e.target.value)}
+                      placeholder="••••••••••••••••••••••••••••••••••••••••"
+                      className="w-full h-14 px-6 bg-gray-50 border border-gray-200 rounded-xl text-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKey(!showApiKey)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showApiKey ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Section 2: Model Selection */}
+                <div className="space-y-4">
+                  <h4 className="text-lg font-bold text-gray-800">2. Chọn Model AI Ưu Tiên</h4>
+                  <p className="text-gray-500 text-sm">Hệ thống sẽ tự động chuyển đổi sang model khác nếu model bạn chọn gặp sự cố (Fallback).</p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {[
+                      { 
+                        id: 'gemini-3-flash-preview', 
+                        name: 'Gemini 3.0 Flash', 
+                        desc: 'Tốc độ cao, chi phí thấp (Khuyên dùng)' 
+                      },
+                      { 
+                        id: 'gemini-3.1-pro-preview', 
+                        name: 'Gemini 3.1 Pro', 
+                        desc: 'Cân bằng giữa thông minh và tốc độ' 
+                      },
+                      { 
+                        id: 'gemini-3.1-flash-lite-preview', 
+                        name: 'Gemini 3.1 Lite', 
+                        desc: 'Phiên bản nhẹ, tốc độ cực nhanh' 
+                      }
+                    ].map((model) => (
+                      <button
+                        key={model.id}
+                        onClick={() => setSelectedModel(model.id)}
+                        className={cn(
+                          "relative p-5 text-left rounded-2xl border-2 transition-all group",
+                          selectedModel === model.id 
+                            ? "border-emerald-500 bg-emerald-50/30" 
+                            : "border-gray-100 hover:border-emerald-200 bg-white"
+                        )}
+                      >
+                        {selectedModel === model.id && (
+                          <div className="absolute top-3 right-3 text-emerald-600">
+                            <CheckCircle2 size={20} />
+                          </div>
+                        )}
+                        <h5 className="font-bold text-gray-900 mb-1">{model.name}</h5>
+                        <p className="text-xs text-gray-500 leading-relaxed">{model.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-6 bg-gray-50 flex items-center justify-between border-t border-gray-100">
+                <button 
+                  onClick={handleTestKey}
+                  disabled={isTestingKey || !customApiKey.trim()}
+                  className={cn(
+                    "px-4 py-2 rounded-lg font-bold text-sm transition-all flex items-center gap-2",
+                    isTestingKey ? "bg-gray-200 text-gray-500" : "bg-blue-50 text-blue-700 hover:bg-blue-100"
+                  )}
+                >
+                  {isTestingKey ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700"></div>
+                  ) : <Play size={14} />}
+                  Kiểm tra Key
+                </button>
+                
+                <div className="flex items-center gap-3">
+                  <button 
+                    onClick={() => setShowSettingsModal(false)}
+                    className="px-6 py-2 text-gray-600 font-bold hover:text-gray-900 transition-colors"
+                  >
+                    Đóng
+                  </button>
+                  <button 
+                    onClick={handleSaveSettings}
+                    className="px-8 py-3 bg-emerald-600 text-white rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-700 transition-all active:scale-95"
+                  >
+                    Lưu Cấu Hình
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Notification Toast */}
       <AnimatePresence>
         {notification && (
@@ -459,13 +772,10 @@ export default function App() {
             </h2>
             <p className="text-[10px] text-gray-400 ml-8 mt-0.5 font-medium uppercase tracking-widest">THPT National Exam Expert Mode</p>
           </div>
-          <button 
-            onClick={() => setIsSettingsOpen(true)}
-            className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-600"
-            title="Cấu hình AI & API Key"
-          >
-            <Settings size={20} />
-          </button>
+          <div className="text-[10px] uppercase tracking-wider font-bold text-gray-400 flex items-center gap-1.5 bg-gray-50 px-2 py-1 rounded border border-gray-100">
+            <div className={cn("w-1.5 h-1.5 rounded-full", apiKeyStatus === 'active' ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" : "bg-amber-500 animate-pulse")} />
+            {apiKeyStatus === 'active' ? "System: Online" : "System: Key Required"}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -639,18 +949,13 @@ export default function App() {
                             type="number" 
                             value={questionMatrix[type as keyof typeof questionMatrix][level as keyof (typeof questionMatrix)['Trắc nghiệm 4 phương án']]} 
                             onChange={(e) => {
-                              const val = e.target.value;
-                              setQuestionMatrix(prev => ({
-                                ...prev,
-                                [type]: {
-                                  ...prev[type as keyof typeof questionMatrix],
-                                  [level]: val
-                                }
-                              }));
-                            }}
-                            className="w-12 h-8 text-center border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
-                            min="0"
+                              const newMatrix = { ...questionMatrix };
+                              newMatrix[type as keyof typeof questionMatrix][level as keyof (typeof questionMatrix)['Trắc nghiệm 4 phương án']] = e.target.value;
+                              setQuestionMatrix(newMatrix);
+                            }} 
+                            className="w-16 h-8 text-center border border-gray-200 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                           />
+                          <span className="text-[10px] text-gray-400">Câu</span>
                         </div>
                       </td>
                     ))}
@@ -660,7 +965,17 @@ export default function App() {
             </table>
           </div>
 
-          <div className="flex flex-col gap-2 mt-4">
+          <div className="form-row items-start">
+            <label className="input-label mt-2">Yêu cầu Ngữ liệu:</label>
+            <textarea 
+              value={requirements}
+              onChange={(e) => setRequirements(e.target.value)}
+              className="form-input min-h-[80px] resize-y"
+              placeholder="Nhập yêu cầu đặc biệt cho AI..."
+            />
+          </div>
+
+          <div className="flex flex-wrap gap-4 py-1">
             <div className="flex items-center gap-2">
               <input 
                 type="checkbox" 
@@ -686,6 +1001,17 @@ export default function App() {
                 <Brain size={16} /> Chế độ Học sâu (Deep Learning)
               </label>
             </div>
+          </div>
+
+          <div className="form-row">
+            <label className="input-label">Cấu hình AI:</label>
+            <button 
+              onClick={() => setShowSettingsModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg font-bold hover:bg-emerald-100 transition-colors"
+            >
+              <Settings size={16} />
+              Thiết lập API Key & Model
+            </button>
           </div>
 
           <div className="flex flex-col gap-2 mt-4">
@@ -831,153 +1157,6 @@ export default function App() {
       <footer className="mt-8 pb-4 text-center text-gray-500 text-sm border-t border-gray-200 pt-4">
         Phát triển bởi Lương Đình Hùng - Zalo: 0986282414 © 2026
       </footer>
-
-      {/* Settings Modal */}
-      <AnimatePresence>
-        {isSettingsOpen && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsSettingsOpen(false)}
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden"
-            >
-              {/* Modal Header */}
-              <div className="bg-[#00966d] p-6 text-white flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
-                    <Key size={24} />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold">Cấu hình AI & API Key</h3>
-                    <p className="text-white/80 text-sm">Thiết lập kết nối để tạo mô phỏng</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setIsSettingsOpen(false)}
-                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-
-              {/* Modal Body */}
-              <div className="p-8 space-y-8">
-                {/* API Key Section */}
-                <section>
-                  <h4 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                    1. Google Gemini API Key <span className="text-red-500">*</span>
-                  </h4>
-                  
-                  <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-4 mb-4">
-                    <div className="text-blue-500 mt-1">
-                      <Info size={20} />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-blue-800 text-sm mb-3">
-                        Bạn chưa có API Key? Hãy lấy key miễn phí từ Google:
-                      </p>
-                      <div className="flex flex-wrap gap-3">
-                        <a 
-                          href="https://aistudio.google.com/app/apikey" 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-[#1a73e8] text-white rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors"
-                        >
-                          Lấy API Key ngay <ExternalLink size={14} />
-                        </a>
-                        <a 
-                          href="https://ai.google.dev/gemini-api/docs/api-key" 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-50 transition-colors"
-                        >
-                          Xem hướng dẫn chi tiết <ExternalLink size={14} />
-                        </a>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="relative">
-                    <input 
-                      type={showApiKey ? "text" : "password"}
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      placeholder="••••••••••••••••••••••••••••••••••••••••"
-                      className="w-full h-14 px-5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#00966d] focus:border-transparent outline-none transition-all text-lg tracking-widest"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowApiKey(!showApiKey)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                    >
-                      {showApiKey ? <EyeOff size={20} /> : <Eye size={20} />}
-                    </button>
-                  </div>
-                </section>
-
-                {/* Model Selection Section */}
-                <section>
-                  <h4 className="text-lg font-bold text-gray-800 mb-1">2. Chọn Model AI Ưu Tiên</h4>
-                  <p className="text-gray-500 text-sm mb-6">
-                    Hệ thống sẽ tự động chuyển đổi sang model khác nếu model bạn chọn gặp sự cố (Fallback).
-                  </p>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {[
-                      { id: 'gemini-3-flash-preview', name: 'Gemini 3.0 Flash', desc: 'Tốc độ cao, chi phí thấp (Khuyên dùng)', recommended: true },
-                      { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', desc: 'Cân bằng giữa thông minh và tốc độ' },
-                      { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Lite', desc: 'Phiên bản nhẹ, tốc độ cực nhanh' }
-                    ].map((model) => (
-                      <button
-                        key={model.id}
-                        onClick={() => setSelectedModel(model.id)}
-                        className={cn(
-                          "relative p-5 rounded-2xl border-2 text-left transition-all group",
-                          selectedModel === model.id 
-                            ? "border-[#00966d] bg-[#f0fff4]" 
-                            : "border-gray-100 hover:border-gray-200 bg-white"
-                        )}
-                      >
-                        {selectedModel === model.id && (
-                          <div className="absolute top-3 right-3 w-5 h-5 bg-[#00966d] rounded-full flex items-center justify-center text-white">
-                            <CheckCircle2 size={14} />
-                          </div>
-                        )}
-                        <h5 className="font-bold text-gray-900 mb-2">{model.name}</h5>
-                        <p className="text-xs text-gray-500 leading-relaxed">{model.desc}</p>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              </div>
-
-              {/* Modal Footer */}
-              <div className="p-6 bg-gray-50 border-t border-gray-100 flex items-center justify-end gap-4">
-                <button 
-                  onClick={() => setIsSettingsOpen(false)}
-                  className="px-6 py-2.5 text-gray-700 font-bold hover:bg-gray-200 rounded-xl transition-colors"
-                >
-                  Đóng
-                </button>
-                <button 
-                  onClick={handleSaveSettings}
-                  className="px-8 py-2.5 bg-[#00966d] text-white font-bold rounded-xl hover:bg-[#007a58] transition-all shadow-lg shadow-emerald-200"
-                >
-                  Lưu Cấu Hình
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }
