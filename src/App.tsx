@@ -256,7 +256,7 @@ export default function App() {
       let lastError: any = null;
 
       try {
-        const ai = new GoogleGenAI({ apiKey: apiKey });
+        const ai = new GoogleGenAI({ apiKey: AIzaSyDHznAWrG7bMT521TfmiyCFfFAaOYah8iw });
         // Use flash-preview for both to avoid paid key popups, but keep thinking for deep learning
         const modelName = "gemini-3-flash-preview";
         
