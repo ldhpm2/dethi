@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Upload, FileText, Settings, Play, Download, CheckCircle2, FileCheck, Eye, EyeOff, Brain } from 'lucide-react';
+import { Upload, FileText, Settings, Play, Download, CheckCircle2, FileCheck, Eye, EyeOff, Brain, Key, ExternalLink, X, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -33,6 +33,27 @@ export default function App() {
   const [output, setOutput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' | 'warning' } | null>(null);
+
+  // AI Settings State
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [apiKey, setApiKey] = useState('');
+  const [selectedModel, setSelectedModel] = useState('gemini-3-flash-preview');
+  const [showApiKey, setShowApiKey] = useState(false);
+
+  // Load settings on mount
+  React.useEffect(() => {
+    const savedKey = localStorage.getItem('gemini_api_key');
+    const savedModel = localStorage.getItem('selected_model');
+    if (savedKey) setApiKey(savedKey);
+    if (savedModel) setSelectedModel(savedModel);
+  }, []);
+
+  const handleSaveSettings = () => {
+    localStorage.setItem('gemini_api_key', apiKey);
+    localStorage.setItem('selected_model', selectedModel);
+    setIsSettingsOpen(false);
+    showNotification('Đã lưu cấu hình thành công!', 'success');
+  };
 
   // Auto-hide notification
   React.useEffect(() => {
@@ -156,7 +177,15 @@ export default function App() {
     setOutput('');
 
     try {
-      const apiKey = process.env.GEMINI_API_KEY;
+      // Priority: 1. Manual API Key, 2. Environment Variable
+      const effectiveApiKey = apiKey || process.env.GEMINI_API_KEY;
+      
+      if (!effectiveApiKey || effectiveApiKey === "MY_GEMINI_API_KEY") {
+        setIsSettingsOpen(true);
+        showNotification("Vui lòng cấu hình API Key để tiếp tục.", "warning");
+        setIsLoading(false);
+        return;
+      }
       
       const prompt = `
         Bạn là chuyên gia ra đề thi THPT quốc gia. Hãy tạo một đề thi/bài tập chi tiết dựa trên các thông tin sau:
@@ -256,17 +285,20 @@ export default function App() {
       let lastError: any = null;
 
       try {
-        const ai = new GoogleGenAI({ apiKey: "AIzaSyDHznAWrG7bMT521TfmiyCFfFAaOYah8iw" });
-        // Use flash-preview for both to avoid paid key popups, but keep thinking for deep learning
-        const modelName = "gemini-3-flash-preview";
+        const ai = new GoogleGenAI({ apiKey: effectiveApiKey });
+        // Use user selected model or fallback to flash-preview
+        const modelName = selectedModel || "gemini-3-flash-preview";
+        const isGemini3 = modelName.startsWith('gemini-3');
         
         const response = await ai.models.generateContentStream({
           model: modelName,
           contents: prompt,
-          config: isDeepLearning ? {
-            thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+          config: {
             temperature: 0.7,
-          } : undefined
+            ...(isDeepLearning && isGemini3 ? {
+              thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH }
+            } : {})
+          }
         });
 
         let fullText = '';
@@ -301,7 +333,7 @@ export default function App() {
         return;
       }
 
-      setOutput("Đã xảy ra lỗi khi tạo đề thi. Vui lòng kiểm tra API Key trong phần Cài đặt của AI Studio.");
+      setOutput("Đã xảy ra lỗi khi tạo đề thi. Vui lòng kiểm tra API Key và cấu hình trong phần Cài đặt (biểu tượng bánh răng).");
     } finally {
       setIsLoading(false);
     }
@@ -427,6 +459,13 @@ export default function App() {
             </h2>
             <p className="text-[10px] text-gray-400 ml-8 mt-0.5 font-medium uppercase tracking-widest">THPT National Exam Expert Mode</p>
           </div>
+          <button 
+            onClick={() => setIsSettingsOpen(true)}
+            className="p-2 hover:bg-gray-100 rounded-full transition-colors text-gray-600"
+            title="Cấu hình AI & API Key"
+          >
+            <Settings size={20} />
+          </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
@@ -792,6 +831,153 @@ export default function App() {
       <footer className="mt-8 pb-4 text-center text-gray-500 text-sm border-t border-gray-200 pt-4">
         Phát triển bởi Lương Đình Hùng - Zalo: 0986282414 © 2026
       </footer>
+
+      {/* Settings Modal */}
+      <AnimatePresence>
+        {isSettingsOpen && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsSettingsOpen(false)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="bg-[#00966d] p-6 text-white flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                    <Key size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold">Cấu hình AI & API Key</h3>
+                    <p className="text-white/80 text-sm">Thiết lập kết nối để tạo mô phỏng</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
+                >
+                  <X size={24} />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-8 space-y-8">
+                {/* API Key Section */}
+                <section>
+                  <h4 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                    1. Google Gemini API Key <span className="text-red-500">*</span>
+                  </h4>
+                  
+                  <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start gap-4 mb-4">
+                    <div className="text-blue-500 mt-1">
+                      <Info size={20} />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-blue-800 text-sm mb-3">
+                        Bạn chưa có API Key? Hãy lấy key miễn phí từ Google:
+                      </p>
+                      <div className="flex flex-wrap gap-3">
+                        <a 
+                          href="https://aistudio.google.com/app/apikey" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-[#1a73e8] text-white rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors"
+                        >
+                          Lấy API Key ngay <ExternalLink size={14} />
+                        </a>
+                        <a 
+                          href="https://ai.google.dev/gemini-api/docs/api-key" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-50 transition-colors"
+                        >
+                          Xem hướng dẫn chi tiết <ExternalLink size={14} />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="relative">
+                    <input 
+                      type={showApiKey ? "text" : "password"}
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder="••••••••••••••••••••••••••••••••••••••••"
+                      className="w-full h-14 px-5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-[#00966d] focus:border-transparent outline-none transition-all text-lg tracking-widest"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKey(!showApiKey)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showApiKey ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </button>
+                  </div>
+                </section>
+
+                {/* Model Selection Section */}
+                <section>
+                  <h4 className="text-lg font-bold text-gray-800 mb-1">2. Chọn Model AI Ưu Tiên</h4>
+                  <p className="text-gray-500 text-sm mb-6">
+                    Hệ thống sẽ tự động chuyển đổi sang model khác nếu model bạn chọn gặp sự cố (Fallback).
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {[
+                      { id: 'gemini-3-flash-preview', name: 'Gemini 3.0 Flash', desc: 'Tốc độ cao, chi phí thấp (Khuyên dùng)', recommended: true },
+                      { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', desc: 'Cân bằng giữa thông minh và tốc độ' },
+                      { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Lite', desc: 'Phiên bản nhẹ, tốc độ cực nhanh' }
+                    ].map((model) => (
+                      <button
+                        key={model.id}
+                        onClick={() => setSelectedModel(model.id)}
+                        className={cn(
+                          "relative p-5 rounded-2xl border-2 text-left transition-all group",
+                          selectedModel === model.id 
+                            ? "border-[#00966d] bg-[#f0fff4]" 
+                            : "border-gray-100 hover:border-gray-200 bg-white"
+                        )}
+                      >
+                        {selectedModel === model.id && (
+                          <div className="absolute top-3 right-3 w-5 h-5 bg-[#00966d] rounded-full flex items-center justify-center text-white">
+                            <CheckCircle2 size={14} />
+                          </div>
+                        )}
+                        <h5 className="font-bold text-gray-900 mb-2">{model.name}</h5>
+                        <p className="text-xs text-gray-500 leading-relaxed">{model.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-6 bg-gray-50 border-t border-gray-100 flex items-center justify-end gap-4">
+                <button 
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="px-6 py-2.5 text-gray-700 font-bold hover:bg-gray-200 rounded-xl transition-colors"
+                >
+                  Đóng
+                </button>
+                <button 
+                  onClick={handleSaveSettings}
+                  className="px-8 py-2.5 bg-[#00966d] text-white font-bold rounded-xl hover:bg-[#007a58] transition-all shadow-lg shadow-emerald-200"
+                >
+                  Lưu Cấu Hình
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
