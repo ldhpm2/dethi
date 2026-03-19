@@ -46,7 +46,6 @@ export default function App() {
     setNotification({ message, type });
   };
 
-  // File states
   const [matrixFile, setMatrixFile] = useState<File | null>(null);
   const [materialFile, setMaterialFile] = useState<File | null>(null);
   const [deepLearningFile, setDeepLearningFile] = useState<File | null>(null);
@@ -63,44 +62,6 @@ export default function App() {
     'Trả lời ngắn': { 'Nhận biết': '0', 'Thông hiểu': '0', 'Vận dụng': '0', 'Vận dụng cao': '0' },
     'Tự luận': { 'Nhận biết': '0', 'Thông hiểu': '0', 'Vận dụng': '0', 'Vận dụng cao': '0' },
   });
-
-  const [customApiKey, setCustomApiKey] = useState('');
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [apiKeyStatus, setApiKeyStatus] = useState<'active' | 'required'>('required');
-
-  // Load saved API key on mount
-  React.useEffect(() => {
-    const savedKey = localStorage.getItem('gemini_api_key');
-    if (savedKey) {
-      setCustomApiKey(savedKey);
-    }
-  }, []);
-
-  const handleSaveApiKey = () => {
-    if (customApiKey) {
-      localStorage.setItem('gemini_api_key', customApiKey);
-      showNotification('Đã lưu API Key thành công!', 'success');
-    } else {
-      localStorage.removeItem('gemini_api_key');
-      showNotification('Đã xóa API Key đã lưu.', 'warning');
-    }
-  };
-
-  // Check for API key on mount and when window gains focus
-  React.useEffect(() => {
-    const checkKey = () => {
-      const key = customApiKey || process.env.GEMINI_API_KEY;
-      if (key && key !== "MY_GEMINI_API_KEY") {
-        setApiKeyStatus('active');
-      } else {
-        setApiKeyStatus('required');
-      }
-    };
-    
-    checkKey();
-    window.addEventListener('focus', checkKey);
-    return () => window.removeEventListener('focus', checkKey);
-  }, [customApiKey]);
 
   const fileInputRef1 = useRef<HTMLInputElement>(null);
   const fileInputRef2 = useRef<HTMLInputElement>(null);
@@ -195,24 +156,7 @@ export default function App() {
     setOutput('');
 
     try {
-      const apiKey = customApiKey || process.env.GEMINI_API_KEY;
-      
-      let apiKeys: string[] = [];
-      if (apiKey && apiKey !== "MY_GEMINI_API_KEY") {
-        apiKeys = (apiKey as string).split(',').map(k => k.trim()).filter(k => k);
-      }
-
-      if (apiKeys.length === 0) {
-        if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
-          await window.aistudio.openSelectKey();
-          setOutput("Vui lòng chọn API Key (Paid/Billing enabled) để tiếp tục.");
-          setIsLoading(false);
-          return;
-        }
-        apiKeys = ["MY_GEMINI_API_KEY"];
-      } else {
-        setApiKeyStatus('active');
-      }
+      const apiKey = process.env.GEMINI_API_KEY;
       
       const prompt = `
         Bạn là chuyên gia ra đề thi THPT quốc gia. Hãy tạo một đề thi/bài tập chi tiết dựa trên các thông tin sau:
@@ -270,7 +214,7 @@ export default function App() {
         --- CHẾ ĐỘ HỌC SÂU (DEEP LEARNING) ĐANG BẬT ---
         Bạn phải thực hiện quy trình tư duy 3 bước trước khi viết đề:
         Bước 1: Phân tích tài liệu học sâu để tìm ra các "điểm mù" kiến thức, các lỗi sai kinh điển, và các dạng bài biến tướng phức tạp nhất.
-        Bước 2: Đối chiếu tài liệu học sâu với Ma trận đề thi để đảm bảo các câu hỏi Vận dụng cao thực sự mang tính đột phá và sáng tạo.
+        Bước 2: Đối chiếu tài liệu học sâu với Ma trận đề thi để đảm bảo các câu hỏi Vận dụng cao thực sự mang tính đột phá and sáng tạo.
         Bước 3: Thiết kế các câu hỏi có tính liên môn hoặc tích hợp nhiều mảng kiến thức từ tài liệu học sâu.
         YÊU CẦU: Đề thi phải có ít nhất 20% câu hỏi mang phong cách "Học sâu" - tức là những câu hỏi đòi hỏi học sinh phải hiểu bản chất cực sâu thay vì chỉ áp dụng công thức.
         ` : ''}
@@ -311,89 +255,53 @@ export default function App() {
       let success = false;
       let lastError: any = null;
 
-      for (let i = 0; i < apiKeys.length; i++) {
-        const currentKey = apiKeys[i];
-        try {
-          const ai = new GoogleGenAI({ apiKey: currentKey });
-          const modelName = isDeepLearning ? "gemini-3.1-pro-preview" : "gemini-3-flash-preview";
-          
-          const response = await ai.models.generateContentStream({
-            model: modelName,
-            contents: prompt,
-            config: isDeepLearning ? {
-              thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
-              temperature: 0.7, // Slightly lower temperature for more focused reasoning
-            } : undefined
-          });
+      try {
+        const ai = new GoogleGenAI({ apiKey: apiKey });
+        // Use flash-preview for both to avoid paid key popups, but keep thinking for deep learning
+        const modelName = "gemini-3-flash-preview";
+        
+        const response = await ai.models.generateContentStream({
+          model: modelName,
+          contents: prompt,
+          config: isDeepLearning ? {
+            thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
+            temperature: 0.7,
+          } : undefined
+        });
 
-          let fullText = '';
-          for await (const chunk of response) {
-            // Remove double asterisks from the chunk text
-            const cleanedChunk = (chunk.text || '').replace(/\*\*/g, '');
-            fullText += cleanedChunk;
-            setOutput(fullText);
-          }
-          
-          success = true;
-          break; // Success, exit the retry loop
-        } catch (error: any) {
-          console.error(`Error with API key index ${i}:`, error);
-          lastError = error;
-          const errorMessage = error?.message || "";
-          
-          if ((errorMessage.includes("429") || errorMessage.includes("RESOURCE_EXHAUSTED") || errorMessage.includes("quota")) && i < apiKeys.length - 1) {
-            showNotification(`Key thứ ${i + 1} đã hết hạn/quota. Đang tự động chuyển sang key tiếp theo...`, "warning");
-            continue; // Try next key
-          }
-          
-          break; // Not a rate limit error, or no more keys to try
+        let fullText = '';
+        for await (const chunk of response) {
+          const cleanedChunk = (chunk.text || '').replace(/\*\*/g, '');
+          fullText += cleanedChunk;
+          setOutput(fullText);
         }
+        
+        success = true;
+      } catch (error: any) {
+        console.error(`Error with API key:`, error);
+        lastError = error;
       }
 
       if (!success && lastError) {
-        throw lastError; // Throw to the outer catch block for final error handling
+        throw lastError;
       }
     } catch (error: any) {
       console.error("Error generating exam:", error);
       
       const errorMessage = error?.message || "";
       
-      // Handle token limit error specifically
       if (errorMessage.includes("exceeds the maximum number of tokens")) {
-        setOutput("Lỗi: Nội dung tài liệu quá lớn, vượt quá giới hạn xử lý của AI. Vui lòng sử dụng tài liệu ngắn hơn hoặc chia nhỏ file.");
+        setOutput("Lỗi: Nội dung tài liệu quá lớn. Vui lòng chia nhỏ file.");
         return;
       }
 
-      // Handle rate limit / quota exceeded
-      const IGNORE_QUOTA = true;
-
-if (!IGNORE_QUOTA && (
-    errorMessage.includes("429") ||
-    errorMessage.includes("RESOURCE_EXHAUSTED") ||
-    errorMessage.includes("quota")
-)) {
-    setOutput("Lỗi quota...");
-    showNotification("Lỗi quota", "error");
-    return;
-}
-
-      // If the error suggests the API key is missing or invalid, prompt for selection automatically
-      if (
-        errorMessage.includes("Requested entity was not found") || 
-        errorMessage.includes("API_KEY") ||
-        errorMessage.includes("403") ||
-        errorMessage.includes("401")
-      ) {
-        if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
-          await window.aistudio.openSelectKey();
-          // After opening the dialog, we can't easily retry automatically because we don't know when they finish
-          setOutput("Vui lòng chọn API Key và nhấn 'TẠO ĐỀ THI' lại.");
-        } else {
-          setOutput("Lỗi API Key. Vui lòng kiểm tra cấu hình.");
-        }
-      } else {
-        setOutput("Đã xảy ra lỗi khi tạo đề thi. Vui lòng thử lại sau.");
+      if (errorMessage.includes("429") || errorMessage.includes("RESOURCE_EXHAUSTED") || errorMessage.includes("quota")) {
+        setOutput("Lỗi: Đã vượt quá giới hạn sử dụng (Quota). Vui lòng thử lại sau.");
+        showNotification("Đã vượt quá giới hạn API. Vui lòng thử lại sau.", "error");
+        return;
       }
+
+      setOutput("Đã xảy ra lỗi khi tạo đề thi. Vui lòng kiểm tra API Key trong phần Cài đặt của AI Studio.");
     } finally {
       setIsLoading(false);
     }
@@ -518,10 +426,6 @@ if (!IGNORE_QUOTA && (
               1. Cấu hình Chuyên gia Ra đề
             </h2>
             <p className="text-[10px] text-gray-400 ml-8 mt-0.5 font-medium uppercase tracking-widest">THPT National Exam Expert Mode</p>
-          </div>
-          <div className="text-[10px] uppercase tracking-wider font-bold text-gray-400 flex items-center gap-1.5 bg-gray-50 px-2 py-1 rounded border border-gray-100">
-            <div className={cn("w-1.5 h-1.5 rounded-full", apiKeyStatus === 'active' ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]" : "bg-amber-500 animate-pulse")} />
-            {apiKeyStatus === 'active' ? "System: Online" : "System: Key Required"}
           </div>
         </div>
 
@@ -696,13 +600,18 @@ if (!IGNORE_QUOTA && (
                             type="number" 
                             value={questionMatrix[type as keyof typeof questionMatrix][level as keyof (typeof questionMatrix)['Trắc nghiệm 4 phương án']]} 
                             onChange={(e) => {
-                              const newMatrix = { ...questionMatrix };
-                              newMatrix[type as keyof typeof questionMatrix][level as keyof (typeof questionMatrix)['Trắc nghiệm 4 phương án']] = e.target.value;
-                              setQuestionMatrix(newMatrix);
-                            }} 
-                            className="w-16 h-8 text-center border border-gray-200 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                              const val = e.target.value;
+                              setQuestionMatrix(prev => ({
+                                ...prev,
+                                [type]: {
+                                  ...prev[type as keyof typeof questionMatrix],
+                                  [level]: val
+                                }
+                              }));
+                            }}
+                            className="w-12 h-8 text-center border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
+                            min="0"
                           />
-                          <span className="text-[10px] text-gray-400">Câu</span>
                         </div>
                       </td>
                     ))}
@@ -712,17 +621,7 @@ if (!IGNORE_QUOTA && (
             </table>
           </div>
 
-          <div className="form-row items-start">
-            <label className="input-label mt-2">Yêu cầu Ngữ liệu:</label>
-            <textarea 
-              value={requirements}
-              onChange={(e) => setRequirements(e.target.value)}
-              className="form-input min-h-[80px] resize-y"
-              placeholder="Nhập yêu cầu đặc biệt cho AI..."
-            />
-          </div>
-
-          <div className="flex flex-wrap gap-4 py-1">
+          <div className="flex flex-col gap-2 mt-4">
             <div className="flex items-center gap-2">
               <input 
                 type="checkbox" 
@@ -747,35 +646,6 @@ if (!IGNORE_QUOTA && (
               <label htmlFor="deep-learning-check" className="text-sm font-bold text-purple-700 flex items-center gap-1">
                 <Brain size={16} /> Chế độ Học sâu (Deep Learning)
               </label>
-            </div>
-          </div>
-
-          <div className="form-row">
-            <label className="input-label">API Key:</label>
-            <div className="flex gap-2 w-full">
-              <div className="relative flex-1">
-                <input 
-                  type={showApiKey ? "text" : "password"}
-                  value={customApiKey}
-                  onChange={(e) => setCustomApiKey(e.target.value)}
-                  placeholder="Nhập API Key (có thể nhập nhiều key, cách nhau bằng dấu phẩy)..."
-                  className="form-input w-full pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowApiKey(!showApiKey)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                >
-                  {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-              <button 
-                onClick={handleSaveApiKey}
-                className="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded text-xs font-bold transition-colors border border-gray-200"
-                title="Lưu API Key vào trình duyệt"
-              >
-                LƯU KEY
-              </button>
             </div>
           </div>
 
