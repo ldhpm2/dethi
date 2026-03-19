@@ -362,14 +362,14 @@ export default function App() {
       if (errorMessage.includes("exceeds the maximum number of tokens")) {
         setOutput("Lỗi: Nội dung tài liệu quá lớn, vượt quá giới hạn xử lý của AI. Vui lòng sử dụng tài liệu ngắn hơn hoặc chia nhỏ file.");
         return;
-     // }
+      }
 
       // Handle rate limit / quota exceeded
       //if (errorMessage.includes("429") || errorMessage.includes("RESOURCE_EXHAUSTED") || errorMessage.includes("quota")) {
        // setOutput("Lỗi: Đã vượt quá giới hạn sử dụng (Quota) của API Key hiện tại. Vui lòng sử dụng API Key khác hoặc thử lại sau.");
        // showNotification("Đã vượt quá giới hạn API. Vui lòng thử lại sau hoặc đổi API Key.", "error");
        // return;
-     // }
+      }
 
       // If the error suggests the API key is missing or invalid, prompt for selection automatically
       if (
