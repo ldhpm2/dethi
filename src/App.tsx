@@ -365,11 +365,17 @@ export default function App() {
       }
 
       // Handle rate limit / quota exceeded
-      if (errorMessage.includes("429") || errorMessage.includes("RESOURCE_EXHAUSTED") || errorMessage.includes("quota")) {
-        setOutput("Lỗi: Đã vượt quá giới hạn sử dụng (Quota) của API Key hiện tại. Vui lòng sử dụng API Key khác hoặc thử lại sau.");
-        showNotification("Đã vượt quá giới hạn API. Vui lòng thử lại sau hoặc đổi API Key.", "error");
-        //return;
-      }
+      const IGNORE_QUOTA = true;
+
+if (!IGNORE_QUOTA && (
+    errorMessage.includes("429") ||
+    errorMessage.includes("RESOURCE_EXHAUSTED") ||
+    errorMessage.includes("quota")
+)) {
+    setOutput("Lỗi quota...");
+    showNotification("Lỗi quota", "error");
+    return;
+}
 
       // If the error suggests the API key is missing or invalid, prompt for selection automatically
       if (
